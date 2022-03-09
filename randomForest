@@ -25,3 +25,50 @@ predict(data_rf, na.omit(data_test[,c('Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 
 
 ftable(predict(data_rf, na.omit(data_test[,c('Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare')]))
 )
+
+costam <- e1071::tune.randomForest(Survived~.,
+                         data = data_1_f, 
+                         mtry = 1:5,
+                         nodesize = 5:10,
+                         ntree = 2000)
+
+
+temp<-rfviz::rf_prep( na.omit(data_1_f[,c('Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare')]),data_1_f$Survived)
+
+varImpPlot(temp$rf)
+
+bcrf <- rfviz::rf_viz(temp, input=TRUE, imp=TRUE, cmd=TRUE)
+
+filled.contour(x=1:5, y=5:10,
+        matrix(data=costam$performances$error,
+                  ncol=6,nrow=5))
+
+sqrt(outer(1:5 ^ 2, 5:10 ^ 2, "+"))
+
+
+data(iris)
+iris.rf <- randomForest(iris[,-5], iris[,5], prox=TRUE)
+iris.p <- classCenter(iris[,-5], iris[,5], iris.rf$prox)
+plot(iris[,3], iris[,4], pch=21, xlab=names(iris)[3], ylab=names(iris)[4],
+     bg=c("red", "blue", "green")[as.numeric(factor(iris$Species))],
+     main="Iris Data with Prototypes")
+points(iris.p[,3], iris.p[,4], pch=21, cex=2, bg=c("red", "blue", "green"))
+
+
+# -------------------------------------------------------------------------
+
+data_1_f
+
+matrix(rnorm(71400), ncol = 100, nrow = 714)
+
+cbind(data_1_f,matrix(rnorm(714000), ncol = 1000, nrow = 714)
+)
+
+temp2 <- cbind(data_1_f,matrix(rnorm(714000), ncol = 1000, nrow = 714)
+)
+colnames(temp2) <- paste0('kolumna', colnames(temp2))
+data_rf <- randomForest(kolumnaSurvived~., data = temp2, prox = T, ntree = 1000)
+
+varImpPlot(data_rf)
+
+
