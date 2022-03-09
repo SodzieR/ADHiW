@@ -1,0 +1,27 @@
+install.packages('e1071')
+install.packages('randomForest')
+
+setwd('C:\\Studenci\\Biostatystyka I mgr\\AJ\\randomForrest_3')
+
+data <- readr::read_csv('train.csv')
+
+data_test2 <- readr::read_csv('test.csv')
+
+library(randomForest)
+library(tidyverse)
+library(caret)
+
+data_1 <- data.frame(data[,c('Survived', 'Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare')])
+data_1_f <- na.omit(data_1)
+data_1_f$Survived <- factor(data_1_f$Survived)
+data_1_f$Survived <- ifelse(data_1_f$Survived ==1,'przezyl','umarl')
+data_1_f$Survived <- factor(data_1_f$Survived, c('przezyl','umarl'))
+
+data_rf <- randomForest(Survived~., data = data_1_f, prox = T, ntree = 10000)
+
+confusionMatrix(predict(data_rf), data_1_f$Survived)
+
+predict(data_rf, na.omit(data_test[,c('Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare')]))
+
+ftable(predict(data_rf, na.omit(data_test[,c('Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare')]))
+)
