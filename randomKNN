@@ -1,0 +1,40 @@
+# http://www2.uaem.mx/r-mirror/web/packages/rknn/vignettes/RandomKNN_Demo.pdf
+
+
+library(dplyr)
+library(Seurat)
+library(patchwork)
+
+data <- read.table(gzfile('C:\\Users\\Polski\\Downloads\\GSE185190_T1D_RNAseq_counts.txt.gz'), sep="\t")
+
+colnames(data) <- data[1,]
+
+data <- data[-1,]
+
+library(rknn)
+
+head(data)
+
+train <- t(data[, 11:40])
+
+test <- t(data[, 41:70])
+
+response <- as.vector(sub('.*\\_', '', colnames(data))[-c(1:2)][11:40])
+
+data.rnn <- rknn(
+  data = train,
+  newdata = test,
+  y = response,
+  r = 3846
+)
+
+data.rnn
+
+confusion(response, fitted(data.rnn))
+
+
+
+
+
+
+
