@@ -1,0 +1,36 @@
+
+library(C50)
+
+train <- readr::read_csv('C:\\Studenci\\Biostatystyka I mgr\\AJ\\randomForrest_3\\train.csv')
+
+train$Survived <- factor(train$Survived)
+train$Embarked <- factor(train$Embarked)
+train$Sex <- factor(train$Sex)
+
+test <-  readr::read_csv('C:\\Studenci\\Biostatystyka I mgr\\AJ\\randomForrest_3\\test.csv')
+
+treeModel <- C5.0(Survived ~ .,
+                  data = train,
+                  trials = 10)
+
+treeModel <- C5.0(y = train$Survived,
+                  x = train[-grep('Survived|PassengerId |Name|Ticket|Cabin', colnames(train))],
+                  trials = 20)
+treeModel
+summary(treeModel)
+plot(treeModel)
+
+treeModel <- C5.0(y = train$Survived,
+                  x = train[-grep('Survived|PassengerId|Name|Ticket|Cabin', colnames(train))],
+                  trials = 1,
+                  rules = F)
+treeModel
+summary(treeModel)
+pdf('dsds.pdf', 100,100)
+plot(treeModel)
+dev.off()
+
+predict(treeModel, newdata = test[-grep('PassengerId |Name|Ticket|Cabin', colnames(test))])
+
+
+
