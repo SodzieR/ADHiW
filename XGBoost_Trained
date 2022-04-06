@@ -1,0 +1,64 @@
+
+#install.packages('xgboost')
+
+setwd('C:\\Studenci\\Biostatystyka I mgr\\AJ\\randomForrest_3')
+
+library(dplyr)
+
+train <- readr::read_csv('train.csv') %>% 
+  select(-c(Name, Ticket, Cabin, PassengerId))
+
+train$Sex <- ifelse(train$Sex == 'male', 0,
+                    ifelse(train$Sex == 'female', 1,NA))
+
+train$Embarked <- ifelse(train$Embarked == 'Q', 1,
+                         ifelse(train$Embarked == 'C', 2,
+                                ifelse(train$Embarked == 'S', 3, NA)))
+
+expand.grid(aa=c(1:5), bb=c(6:10))
+
+gridExpanded <- expand.grid(
+  nrounds = 1:10*10000,
+  max_depth = 4:8,
+  eta = 5:10*0.01,
+  gamma = 0:10,
+  colsample_bytree = 5:10*0.1,
+  min_child_weight = 1:10,
+  subsample = 5:10*0.1
+)
+
+test <- readr::read_csv('test.csv')
+
+require(xgboost)
+
+bstSparse2 <-
+  xgboost(
+    data = as.matrix(train[-1]),
+    label = as.matrix(train[1]),
+    max.depth = 6, # default
+    eta = 0.1,
+    nthread = 4,
+    nrounds = 10000,
+    objective = "binary:logistic"
+  )
+
+p2 <- sum(train[1] != ((predict(bstSparse, as.matrix(train[-1])) > 0.5) + 0))/nrow(train)
+
+
+# -------------------------------------------------------------------------
+
+caret::train(
+  as.matrix(train[-1]),
+  factor(dplyr::pull(train[1])),
+  method = 'xgbTree',
+  metric = 'Accuracy',
+  tuneGrid = gridExpanded,
+  trControl = trainControl(method = "cv")
+)
+
+
+
+
+
+
+
