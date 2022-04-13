@@ -1,0 +1,94 @@
+
+
+set.seed(100)
+x <- matrix(rnorm(40),20,2)
+y <- rep(c(-1,1),c(10,10))
+x[y == 1,] = x[y == 1,] + 1
+plot(x, col = y + 3, pch = 19)
+
+
+library(e1071)
+data = data.frame(x, y = as.factor(y))
+
+
+data.svm = svm(y ~ ., data = data, kernel = "linear", cost = 10, scale = FALSE)
+print(data.svm)
+
+plot(data.svm, data)
+
+
+curve(-x^2, from=1, to=50, , xlab="x", ylab="y")
+# -------------------------------------------------------------------------
+data(iris)
+attach(iris)
+
+## classification mode
+# default with factor response:
+model <- svm(Species ~ ., data = iris)
+
+# alternatively the traditional interface:
+x <- subset(iris, select = -Species)
+y <- Species
+model <- svm(x, y) 
+
+print(model)
+summary(model)
+
+# test with train data
+pred <- predict(model, x)
+# (same as:)
+pred <- fitted(model)
+
+# Check accuracy:
+table(pred, y)
+
+# compute decision values and probabilities:
+pred <- predict(model, x, decision.values = TRUE)
+attr(pred, "decision.values")[1:4,]
+
+# visualize (classes by color, SV by crosses):
+plot(cmdscale(dist(iris[,-5])),
+     col = as.integer(iris[,5]),
+     pch = c("o","+")[1:150 %in% model$index + 1])
+# -------------------------------------------------------------------------
+
+
+
+train <- readr::read_csv('C:\\Studenci\\Biostatystyka I mgr\\AJ\\randomForrest_3\\train.csv')
+
+train$Survived <- factor(train$Survived)
+train$Embarked <- factor(train$Embarked)
+train$Sex <- factor(train$Sex)
+
+train2 <- train[-grep('PassengerId|Name|Ticket|Cabin', colnames(train))]
+
+test <-  readr::read_csv('C:\\Studenci\\Biostatystyka I mgr\\AJ\\randomForrest_3\\test.csv')
+
+data.svm = svm(Survived ~ ., data = train2, kernel = "linear", cost = 10, scale = FALSE)
+print(data.svm)
+
+plot(data.svm, data)
+
+summary(data.svm)
+
+pred <- predict(data.svm, train2[-grep('Survived', colnames(train2))])
+
+pred <- fitted(data.svm)
+
+table(pred, na.omit(train2)$Survived)
+
+# compute decision values and probabilities:
+pred <- predict(data.svm, train2[-grep('Survived', colnames(train2))], decision.values = TRUE)
+attr(pred, "decision.values")[1:4,]
+
+# visualize (classes by color, SV by crosses):
+plot(cmdscale(dist(train2[-grep('Survived', colnames(train2))])),
+     col = as.integer(train2$Survived),
+     pch = c("o","+")[1:150 %in% data.svm$index + 1])
+
+
+
+
+
+
+
