@@ -109,10 +109,16 @@ obj <- tune.svm(Survived ~ .,
                 cost = 2^(-10:10))
 
 
+mat = matrix(obj$performances$error, ncol=length(unique(log(obj$performances$gamma))), byrow=T)
+filled.contour(
+  x = sort(unique(log2(obj$performances$gamma))), 
+  y = sort(unique(log2(obj$performances$cost))), 
+  z=mat,
+  xlab=expression("log2 C"),
+  ylab=expression("log2 gamma")
+)
 
-
-
-
+?sort
 
 
 
