@@ -60,14 +60,31 @@ train$Survived <- factor(train$Survived)
 train$Embarked <- factor(train$Embarked)
 train$Sex <- factor(train$Sex)
 
-train2 <- train[-grep('PassengerId|Name|Ticket|Cabin', colnames(train))]
+train2 <- na.omit(train[-grep('PassengerId|Name|Ticket|Cabin', colnames(train))])
+
+train2$Sex <- ifelse(train2$Sex == 'male', 0, 1)
+train2$Embarked1 <- ifelse(train2$Embarked == 'C', 1, 0)
+train2$Embarked2 <- ifelse(train2$Embarked == 'Q', 1,0)
+
+train2$Pclass1 <- ifelse(train2$Pclass == 1, 1, 0)
+train2$Pclass2 <- ifelse(train2$Pclass == 2, 1, 0)
+
+train2 <- train2[-(grep('Embarked|Pclass', names(train2))[1:2])]
+
+train2$Sex <- factor(train2$Sex)
+train2$Embarked1 <- factor(train2$Embarked1)
+train2$Embarked2 <- factor(train2$Embarked2)
+train2$Pclass1 <- factor(train2$Pclass1)
+train2$Pclass2 <- factor(train2$Pclass2)
 
 test <-  readr::read_csv('C:\\Studenci\\Biostatystyka I mgr\\AJ\\randomForrest_3\\test.csv')
 
-data.svm = svm(Survived ~ ., data = train2, kernel = "linear", cost = 10, scale = FALSE)
-print(data.svm)
+data.svm = svm(Survived ~ ., 
+               data = train2,
+               kernel = "radial")
 
-plot(data.svm, data)
+
+print(data.svm)
 
 summary(data.svm)
 
@@ -79,12 +96,39 @@ table(pred, na.omit(train2)$Survived)
 
 # compute decision values and probabilities:
 pred <- predict(data.svm, train2[-grep('Survived', colnames(train2))], decision.values = TRUE)
-attr(pred, "decision.values")[1:4,]
+attr(pred, "decision.values")[1:2,]
 
 # visualize (classes by color, SV by crosses):
 plot(cmdscale(dist(train2[-grep('Survived', colnames(train2))])),
      col = as.integer(train2$Survived),
      pch = c("o","+")[1:150 %in% data.svm$index + 1])
+
+obj <- tune.svm(Survived ~ .,
+                data = train2,
+                gamma = 2^(-10:10),
+                cost = 2^(-10:10))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
