@@ -1,0 +1,294 @@
+---
+title: "<center><div class='mytitle'>Projekt grupowy - Biostatystyka I mgr<p>`r Sys.Date()`</p></div></center>"
+output: 
+  html_document:
+    number_sections: FALSE
+    toc: TRUE
+    toc_float: TRUE
+---
+
+<br><br>
+
+Projekt grupowy z zakresy analizy danych hierarchicznych i wielowymiarowych. Członkowie grupy w projekcie:
+
+- Adrian Janucik
+
+- Angelika Grodzka
+
+- Katarzyna Miniewska
+
+- Marta Moroz
+
+- Lidia Aleksandra Pieńkosz
+
+- Arkadiusz Franciszek Żbikowski
+
+Opiekun projektu: dr mgr inż. Paweł Malinowski
+
+***
+
+# Zakładki {.tabset}
+
+```{r setup, echo = F}
+# Set global options
+knitr::opts_chunk$set(
+  cache = FALSE,
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE
+)
+
+# Import libraries
+suppressPackageStartupMessages(library(readr))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(sjmisc))
+suppressPackageStartupMessages(library(e1071))
+suppressPackageStartupMessages(library(class))
+suppressPackageStartupMessages(library(randomForest))
+suppressPackageStartupMessages(library(C50))
+suppressPackageStartupMessages(library(gbm))
+suppressPackageStartupMessages(library(xgboost))
+suppressPackageStartupMessages(library(caret))
+suppressPackageStartupMessages(library(parallel))
+suppressPackageStartupMessages(library(doParallel))
+
+# Data wrangling
+train <- read_csv('train.csv') %>% 
+  mutate(Pclass_2 = factor(ifelse(Pclass==2, 1, 0)),
+         Pclass_3 = factor(ifelse(Pclass==3, 1, 0)),
+         Sex_Female = factor(ifelse(Sex=='female', 1, 0)),
+         Embarked_S = factor(ifelse(Embarked=='S', 1, 0)),
+         Embarked_Q = factor(ifelse(Embarked=='Q', 1, 0)),
+         Survived = factor(Survived)
+         ) %>% 
+  select(-c(PassengerId, Ticket, Cabin, Name, Pclass, Sex, Embarked)) %>% 
+  na.omit()
+
+train_data <- train %>% 
+  select(-Survived)
+train_survived <- train %>% 
+  pull(Survived)
+
+test <- read_csv('test.csv') %>% 
+  mutate(Pclass_2 = factor(ifelse(Pclass==2, 1, 0)),
+         Pclass_3 = factor(ifelse(Pclass==3, 1, 0)),
+         Sex_Female = factor(ifelse(Sex=='female', 1, 0)),
+         Embarked_S = factor(ifelse(Embarked=='S', 1, 0)),
+         Embarked_Q = factor(ifelse(Embarked=='Q', 1, 0))
+         ) %>% 
+  select(-c(PassengerId, Ticket, Cabin, Name, Pclass, Sex, Embarked)) %>% 
+  na.omit()
+  
+
+```
+
+<br><br>
+
+## 0) Wstęp
+
+Projekt ma na celu przedstawienie różnych metod z zakresu algorytmów uczenia maszynowego w celu analizy zbioru danych [Titanic](https://www.kaggle.com/competitions/titanic/data). Głównym założeniem zastosowanych metod jest utworzenie takiego modelu, który sklasyfikuje pasażerów statku Titanic jako tych, którzy przeżyli, bądź zgineli podczas zderzenia.
+
+<!-- RANDOM KNN GOT REMOVED FROM CRAN // PART DROPPED -->
+<!-- ## 1) Random KNN -->
+
+<!-- ```{r rKNN} -->
+
+<!-- set.seed(42) -->
+<!-- tune_knn_params <- tune.knn(x = train_data, -->
+<!--                             y = train_survived, -->
+<!--                             k = 1:30, -->
+<!--                             #l = 1:100, -->
+<!--                             tunecontrol = tune.control(sampling = "cross"),  -->
+<!--                             cross = 10) -->
+<!-- summary(tune_knn_params) -->
+<!-- plot(tune_knn_params) -->
+
+<!-- train_rknn <- knn(train = train_data, -->
+<!--                   test = na.omit(as.matrix(test)), -->
+<!--                   cl = train_survived, -->
+<!--                   k = 29, -->
+<!--                  # l = 26, -->
+<!--                   prob = FALSE, -->
+<!--                   use.all = TRUE) -->
+
+<!-- ``` -->
+
+## 1) Random Forest
+
+```{r randomForest}
+
+set.seed(42)
+tune_randomForest_params <- tune.randomForest(train_data, 
+                                     y = train_survived,
+                                     nodesize = 15:20, 
+                                     mtry = 1:9, 
+                                     ntree = 100,
+                                     verbose = T)
+
+temp <- rfviz::rf_prep(train_data, train_survived)
+
+varImpPlot(temp$rf)
+
+#bcrf <- rfviz::rf_viz(temp, input=TRUE, imp=TRUE, cmd=TRUE)
+
+filled.contour(x=1:20, y=1:9,
+        matrix(data=tune_randomForest_params$performances$error,
+                  ncol=9,nrow=20))
+
+randomForest_model <- randomForest(x = train_data,
+                                   y = train_survived,
+                                  prox = T, 
+                                  ntree = tune_randomForest_params$best.parameters$ntree,
+                                  nodesize = tune_randomForest_params$best.parameters$nodesize,
+                                  mtry = tune_randomForest_params$best.parameters$mtry)
+
+caret::confusionMatrix(predict(randomForest_model), train_survived)
+
+predict(randomForest_model, na.omit(test))
+
+```
+
+## 2) AdaBoost
+
+```{r AdaBoost}
+
+treeModel <- C5.0(train_data,
+                  train_survived,
+                  trials = 100)
+treeModel
+
+summary(treeModel)
+
+plot(treeModel)
+
+predict(treeModel, newdata = test)
+
+```
+
+## 3) Gradient Boosting
+
+```{r gBoost}
+# for reproducibility
+set.seed(42)
+
+train_gbm <- train %>% 
+  mutate(Survived = as.numeric(Survived)-1)
+
+# train GBM model
+gbm.fit <- gbm(
+  formula = Survived ~ .,
+  distribution = "bernoulli",
+  data = train_gbm,
+  n.trees = 10000,
+  interaction.depth = 9,
+  shrinkage = 0.001,
+  cv.folds = 10,
+  n.cores = 8, # will use all cores by default
+  verbose = TRUE
+  )  
+
+print(gbm.fit)
+
+gbm.perf(gbm.fit)
+
+summary(gbm.fit)
+
+sum(train_gbm$Survived != (make.link("logit")$linkinv(gbm.fit$fit)>0.5)+0)
+
+sum(train_gbm$Survived != (make.link("logit")$linkinv(gbm.fit$fit)>0.5)+0)/nrow(train_gbm)
+
+
+```
+
+## 4) XGBoost
+
+```{r XGBoost}
+gridExpanded <- expand.grid(
+  nrounds = 1:10*10000,
+  max_depth = 4:9,
+  eta = 5:10*0.01,
+  gamma = 0:10,
+  colsample_bytree = 5:10*0.1,
+  min_child_weight = 1:10,
+  subsample = 5:10*0.1
+)
+
+train_xgboost <- train %>% mutate(Pclass_2 = as.numeric(as.character(Pclass_2)), Pclass_3 = as.numeric(as.character(Pclass_3)), Sex_Female =as.numeric(as.character(Sex_Female)), Embarked_S=as.numeric(as.character(Embarked_S)), Embarked_Q=as.numeric(as.character(Embarked_Q))) %>% select(-c(1)) %>% as.matrix()
+
+xgboost_bestParams <- caret::train(
+  train_xgboost,
+  train$Survived,
+  method = 'xgbTree',
+  metric = 'Accuracy',
+  tuneGrid = gridExpanded[1:10,],
+  trControl = caret::trainControl(method = "cv", verboseIter = TRUE)
+)
+
+
+bstSparse2 <-
+  xgboost(
+    data = train_xgboost,
+    label = as.numeric(as.character(train$Survived)),
+    max.depth = xgboost_bestParams$bestTune$max_depth, # default
+    eta = xgboost_bestParams$bestTune$eta,
+    nrounds = xgboost_bestParams$bestTune$nrounds,
+    objective = "binary:logistic"
+  )
+
+p2 <- sum(as.numeric(as.character(train$Survived)) != ((predict(bstSparse2, as.matrix(as.numeric(as.character(train$Survived)))) > 0.5) + 0))/nrow(train)
+
+
+
+```
+
+## 5) SVM
+
+```{r SVM}
+obj <- tune.svm(Survived ~ .,
+                data = train,
+                gamma = 2^(-10:10),
+                cost = 2^(-10:10))
+
+data.svm = svm(Survived ~ ., 
+               data = train,
+               kernel = "radial",
+               gamma = obj$best.parameters$gamma,
+               cost = obj$best.parameters$cost)
+
+print(data.svm)
+summary(data.svm)
+pred <- predict(data.svm, train[-grep('Survived', colnames(train))])
+pred <- fitted(data.svm)
+table(pred, na.omit(train)$Survived)
+
+
+```
+
+## 6) Neural Networks
+
+```{r NN}
+reticulate::use_condaenv(condaenv = "tf", conda = "/Users/andrzejeljaszewicz/opt/anaconda3/bin/conda")
+
+
+library(keras)
+model <- keras_model_sequential()
+model %>%
+  layer_dense(units=10,activation = "relu",
+              kernel_initializer = "he_normal",input_shape =c(7))%>%
+  layer_dense(units=2,activation = "sigmoid")
+summary(model)  
+
+model %>%
+  compile(loss="binary_crossentropy",
+          optimizer="adam",
+          metric="accuracy")
+
+history <- model %>%
+ fit(trainx,trainlabel,epoch=100,batch_size=20,validation_split=0.2)
+
+train_eva <- model %>%
+  evaluate(trainx,trainlabel)
+
+```
+
+
