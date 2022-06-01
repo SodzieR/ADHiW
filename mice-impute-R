@@ -1,0 +1,91 @@
+
+setwd('C:\\Studenci\\Biostatystyka I mgr\\AJ')
+
+
+# Import libraries
+suppressPackageStartupMessages(library(readr))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(sjmisc))
+suppressPackageStartupMessages(library(e1071))
+suppressPackageStartupMessages(library(class))
+suppressPackageStartupMessages(library(randomForest))
+suppressPackageStartupMessages(library(C50))
+suppressPackageStartupMessages(library(gbm))
+suppressPackageStartupMessages(library(xgboost))
+suppressPackageStartupMessages(library(caret))
+suppressPackageStartupMessages(library(parallel))
+suppressPackageStartupMessages(library(doParallel))
+
+# Data wrangling
+train <- read_csv('train.csv') %>% 
+  mutate(Pclass_2 = factor(ifelse(Pclass==2, 1, 0)),
+         Pclass_3 = factor(ifelse(Pclass==3, 1, 0)),
+         Sex_Female = factor(ifelse(Sex=='female', 1, 0)),
+         Embarked_S = factor(ifelse(Embarked=='S', 1, 0)),
+         Embarked_Q = factor(ifelse(Embarked=='Q', 1, 0)),
+         Survived = factor(Survived)
+  ) %>% 
+  select(-c(PassengerId, Ticket, Cabin, Name, Pclass, Sex, Embarked))
+
+test <- read_csv('test.csv') %>% 
+  mutate(Pclass_2 = factor(ifelse(Pclass==2, 1, 0)),
+         Pclass_3 = factor(ifelse(Pclass==3, 1, 0)),
+         Sex_Female = factor(ifelse(Sex=='female', 1, 0)),
+         Embarked_S = factor(ifelse(Embarked=='S', 1, 0)),
+         Embarked_Q = factor(ifelse(Embarked=='Q', 1, 0))
+  ) %>% 
+  select(-c(PassengerId, Ticket, Cabin, Name, Pclass, Sex, Embarked))
+
+# Data imputation ---------------------------------------------------------
+train_data <- read_csv('train.csv') %>% 
+  select(-c(PassengerId, Ticket, Cabin, Name))
+
+# mark some rows as nominal
+train_data$Sex <- as.factor(train_data$Sex)
+train_data$Embarked <- as.factor(train_data$Embarked)
+train_data$Survived <- as.factor(train_data$Survived)
+
+mi <- mice(train_data,
+           blocks = make.blocks(train_data, partition = 'collect'), calltype = "formula"))
+
+train_data_1 <- complete(mi)
+
+# Test
+
+test_data <- read_csv('test.csv') %>% 
+  select(-c(Ticket, Cabin, Name))
+
+# mark some rows as nominal
+test_data$Sex <- as.factor(test_data$Sex)
+test_data$Embarked <- as.factor(test_data$Embarked)
+
+mi2 <- mice(test_data,
+           blocks = make.blocks(test_data, partition = 'collect', calltype = "formula"))
+
+test_data_1 <- complete(mi2)
+
+library(randomForest)
+
+model <- randomForest(
+  Survived ~ Pclass + Sex + Age + SibSp + Parch + Embarked + Pclass:Sex + Pclass:Age + Age:Sex, 
+  data=train_data_1,
+  ntree=2000
+)
+
+test_data_1$Survived <- predict(model, newdata=test_data_1, type="response")
+
+write.csv(test_data_1[,c("PassengerId", "Survived")], file="predictions.csv", row.names=FALSE, quote=FALSE)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
