@@ -27,19 +27,30 @@ Opiekun projektu: dr mgr inż. Paweł Malinowski
 
 ***
 
+<br><br>
+
+Projekt ma na celu przedstawienie różnych metod z zakresu algorytmów uczenia maszynowego w celu analizy zbioru danych [Titanic](https://www.kaggle.com/competitions/titanic/data). Głównym założeniem zastosowanych metod jest utworzenie takiego modelu, który sklasyfikuje pasażerów statku Titanic jako tych, którzy przeżyli, bądź zgineli podczas zderzenia.
+
+<br><br>
+
+***
+
 # Zakładki {.tabset}
 
-```{r setup, echo = F}
+## 0) Wstęp
+
+```{r setup, include=FALSE}
 # Set global options
 knitr::opts_chunk$set(
-  cache = FALSE,
-  echo = FALSE,
+  cache = TRUE,
+  echo = TRUE,
   message = FALSE,
   warning = FALSE
 )
 
 # Import libraries
 suppressPackageStartupMessages(library(readr))
+suppressPackageStartupMessages(library(mice))
 suppressPackageStartupMessages(library(dplyr))
 suppressPackageStartupMessages(library(sjmisc))
 suppressPackageStartupMessages(library(e1071))
@@ -51,104 +62,222 @@ suppressPackageStartupMessages(library(xgboost))
 suppressPackageStartupMessages(library(caret))
 suppressPackageStartupMessages(library(parallel))
 suppressPackageStartupMessages(library(doParallel))
+```
 
-# Data wrangling
-train <- read_csv('train.csv') %>% 
-  mutate(Pclass_2 = factor(ifelse(Pclass==2, 1, 0)),
-         Pclass_3 = factor(ifelse(Pclass==3, 1, 0)),
-         Sex_Female = factor(ifelse(Sex=='female', 1, 0)),
+Przed podjęciem uczenia naszych algorytmów wypełniliśmy braki danych w naszej tabeli za pomocą bilbioteki *mice*. Poniżej przedstawiony kod przedstawia krok po kroku metody *data wrangling* zastosowane podczas transofrmacji ramki danyc, w celu otrzymania odpowiedniej formy wejściowej do każdego z algorytmów uczenia maszynowego. 
+
+```{r wrangling}
+# Importing the train dataset
+train_raw <- read_csv('train.csv') %>% 
+  select(-c(PassengerId, Ticket, Cabin, Name)) # Drop not needed columns
+# Importing the test dataset
+test_raw <- read_csv('test.csv') %>% 
+  select(-c(Ticket, Cabin, Name)) # Drop not needed columns
+
+# Show how many cases are missing in the data
+colSums(is.na(train_raw))
+colSums(is.na(test_raw))
+
+# Change col types to factor
+train_raw$Sex <- as.factor(train_raw$Sex)
+train_raw$Embarked <- as.factor(train_raw$Embarked)
+train_raw$Survived <- as.factor(train_raw$Survived)
+
+test_raw$Sex <- as.factor(test_raw$Sex)
+test_raw$Embarked <- as.factor(test_raw$Embarked)
+
+# Impute missing values using mice
+mi_train <- mice(train_raw,
+           blocks = make.blocks(train_raw, partition = 'collect')) # make missing vars dependent on all other variables
+
+mi_test <- mice(test_raw,
+           blocks = make.blocks(test_raw, partition = 'collect')) # make missing vars dependent on all other variables
+
+# Fill table with imputed values
+train_complete <- complete(mi_train)
+
+test_complete <- complete(mi_test)
+
+# Show what is missing after imputation
+colSums(is.na(train_complete))
+colSums(is.na(test_complete))
+
+# Introduce dummy vars
+train <- train_complete %>% 
+  mutate(Sex_Female = factor(ifelse(Sex=='female', 1, 0)),
          Embarked_S = factor(ifelse(Embarked=='S', 1, 0)),
          Embarked_Q = factor(ifelse(Embarked=='Q', 1, 0)),
          Survived = factor(Survived)
          ) %>% 
-  select(-c(PassengerId, Ticket, Cabin, Name, Pclass, Sex, Embarked)) %>% 
-  na.omit()
+  select(-c(Sex, Embarked))
 
-train_data <- train %>% 
-  select(-Survived)
+# Pull survived info from df and leave df without it
 train_survived <- train %>% 
   pull(Survived)
+train_data <- train %>% 
+  select(-Survived)
 
-test <- read_csv('test.csv') %>% 
-  mutate(Pclass_2 = factor(ifelse(Pclass==2, 1, 0)),
-         Pclass_3 = factor(ifelse(Pclass==3, 1, 0)),
-         Sex_Female = factor(ifelse(Sex=='female', 1, 0)),
+# Introduce dummy vars in test data 
+test <- test_complete %>% 
+  mutate(Sex_Female = factor(ifelse(Sex=='female', 1, 0)),
          Embarked_S = factor(ifelse(Embarked=='S', 1, 0)),
          Embarked_Q = factor(ifelse(Embarked=='Q', 1, 0))
          ) %>% 
-  select(-c(PassengerId, Ticket, Cabin, Name, Pclass, Sex, Embarked)) %>% 
-  na.omit()
+  select(-c(Sex, Embarked))
   
-
 ```
 
-<br><br>
-
-## 0) Wstęp
-
-Projekt ma na celu przedstawienie różnych metod z zakresu algorytmów uczenia maszynowego w celu analizy zbioru danych [Titanic](https://www.kaggle.com/competitions/titanic/data). Głównym założeniem zastosowanych metod jest utworzenie takiego modelu, który sklasyfikuje pasażerów statku Titanic jako tych, którzy przeżyli, bądź zgineli podczas zderzenia.
-
-<!-- RANDOM KNN GOT REMOVED FROM CRAN // PART DROPPED -->
-<!-- ## 1) Random KNN -->
-
-<!-- ```{r rKNN} -->
-
-<!-- set.seed(42) -->
-<!-- tune_knn_params <- tune.knn(x = train_data, -->
-<!--                             y = train_survived, -->
-<!--                             k = 1:30, -->
-<!--                             #l = 1:100, -->
-<!--                             tunecontrol = tune.control(sampling = "cross"),  -->
-<!--                             cross = 10) -->
-<!-- summary(tune_knn_params) -->
-<!-- plot(tune_knn_params) -->
-
-<!-- train_rknn <- knn(train = train_data, -->
-<!--                   test = na.omit(as.matrix(test)), -->
-<!--                   cl = train_survived, -->
-<!--                   k = 29, -->
-<!--                  # l = 26, -->
-<!--                   prob = FALSE, -->
-<!--                   use.all = TRUE) -->
-
-<!-- ``` -->
+Domyślnie funkcja *mice()* wykorzystuje "pmm", predykcyjne dopasowanie średniej (dane liczbowe); "logreg", imputację regresji logistycznej (dane binarne, czynnik z 2 poziomami); "polyreg", imputację regresji politomicznej dla nieuporządkowanych danych kategorialnych (kategorie > 2 poziomy); "polr", model proporcjonalnych szans dla (porządkow, > 2 poziomy).
 
 ## 1) Random Forest
 
+Algorytm Random Forest To metoda klasyfikacji (i regresji) polegająca na tworzeniu wielu drzew decyzyjnych na podstawie losowego zestawu danych. Idea tego algorytmu polega na zbudowaniu konsylium ekspertów z losowych drzew decyzyjnych, gdzie w odróżnieniu od klasycznych drzew decyzji, losowe drzewa budowane są na zasadzie, iż podzbiór analizowanych cech w węźle dobierany jest losowo. Ponadto, poszczególne drzewa z losowych lasów drzew budowane są zgodnie z koncepcją Bugging. Cechy Algorytmu Random Forest jest najlepszy jeśli chodzi o dokładność wśród pozostałych algorytmów działa skutecznie na dużych bazach danych utrzymuje dokładność w przypadku braku danych daje oszacowanie, które zmienne są istotne w klasyfikacji nie ma potrzeby przycinania drzew lasy mogą być zapisane i wykorzystane w przyszłości dla innego zbioru danych nie wymaga wiedzy eksperckiej nie jest podatny na overfitting Lasy losowe są uznawane za jedna z najlepszych metod klasyfikacji. Pojedyncze klasyfikatory lasu losowego to drzewa decyzyjne. Algorytm RandomForest bardzo dobrze nadaje się do badania próby, gdzie wektor obserwacji jest dużego wymiaru. Ich dodatkową zaletą jest możliwość użycia nauczonego lasu losowego do innych zagadnień niż tylko do klasyfikacji. Przykładowo, na podstawie drzew z lasu można wyznaczyć ranking zmiennych, a tym samym określić, które zmienne mają lepsze właściwości predykcyjne. Podczas generowania drzew zbiór wejściowy zostaje podzielony na dwa podzbiory: treningowy oraz zbiór OOB (out-of-bag), który składa się z ok. 1 3 obserwacji. Zbiór OOB służy do estymacji błędów klasyfikacji oraz istotności poszczególnych zmiennych. Błąd predykcji OOB pokazuje ile elementów ze zbioru testowego nie zostało przyporządkowanych poprawnie do ich właściwych klas. Jest on różnicą między wszystkimi elementami znajdującymi się w macierzy trafności, a elementami znajdującymi się poza przekątną macierzy.
+
 ```{r randomForest}
 
-set.seed(42)
-tune_randomForest_params <- tune.randomForest(train_data, 
-                                     y = train_survived,
-                                     nodesize = 15:20, 
-                                     mtry = 1:9, 
-                                     ntree = 100,
-                                     verbose = T)
+# Feature selection plot
+fs_rf <- rfviz::rf_prep(train_data, train_survived)
 
-temp <- rfviz::rf_prep(train_data, train_survived)
+varImpPlot(fs_rf$rf, main = 'Random Forest Variable Importance Plot')
 
-varImpPlot(temp$rf)
+```
 
-#bcrf <- rfviz::rf_viz(temp, input=TRUE, imp=TRUE, cmd=TRUE)
+<!-- ```{r} -->
+<!-- # Tune randomForsest hyperparameters -->
+<!-- (tune_randomForest_params_100 <- tune.randomForest( -->
+<!--   x = train_data, -->
+<!--   y = train_survived, -->
+<!--   mtry = 1:8, # default: sqrt(p) where p is number of variables in x and regression (p/3) -->
+<!--   nodesize = 1:20, # default values are different for classification (1) and regression (5) -->
+<!--   ntree = 101, -->
+<!--   verbose = T -->
+<!-- )) -->
 
-filled.contour(x=1:20, y=1:9,
-        matrix(data=tune_randomForest_params$performances$error,
-                  ncol=9,nrow=20))
+<!-- # Contour plot of accurcy ~ hyperparameters mtry & nodesize -->
+<!-- filled.contour( -->
+<!--   x = 1:8, # mtry -->
+<!--   y = 1:20, # nodesize -->
+<!--   matrix( -->
+<!--     data = tune_randomForest_params_100$performances$error, -->
+<!--     nrow = 8, # mtry -->
+<!--     ncol = 20 # nodesize -->
+<!--   ), -->
+<!--   plot.title = 'Accuracy Gradient Plot; ntree = 0.1k', -->
+<!--   xlab = 'mtry', -->
+<!--   ylab = 'nodesize' -->
+<!-- ) -->
 
-randomForest_model <- randomForest(x = train_data,
-                                   y = train_survived,
-                                  prox = T, 
-                                  ntree = tune_randomForest_params$best.parameters$ntree,
-                                  nodesize = tune_randomForest_params$best.parameters$nodesize,
-                                  mtry = tune_randomForest_params$best.parameters$mtry)
+<!-- ``` -->
 
+<!-- ```{r} -->
+<!-- # Tune randomForsest hyperparameters -->
+<!-- (tune_randomForest_params_1000 <- tune.randomForest( -->
+<!--   x = train_data, -->
+<!--   y = train_survived, -->
+<!--   mtry = 1:8, # default: sqrt(p) where p is number of variables in x and regression (p/3) -->
+<!--   nodesize = 1:20, # default values are different for classification (1) and regression (5) -->
+<!--   ntree = 102, -->
+<!--   verbose = T -->
+<!-- )) -->
+
+<!-- # Contour plot of accurcy ~ hyperparameters mtry & nodesize -->
+<!-- filled.contour( -->
+<!--   x = 1:8, # mtry -->
+<!--   y = 1:20, # nodesize -->
+<!--   matrix( -->
+<!--     data = tune_randomForest_params_1000$performances$error, -->
+<!--     nrow = 8, # mtry -->
+<!--     ncol = 20 # nodesize -->
+<!--   ), -->
+<!--   plot.title = 'Accuracy Gradient Plot; ntree = 1k', -->
+<!--   xlab = 'mtry', -->
+<!--   ylab = 'nodesize' -->
+<!-- ) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- # Tune randomForsest hyperparameters -->
+<!-- (tune_randomForest_params_10000 <- tune.randomForest( -->
+<!--   x = train_data, -->
+<!--   y = train_survived, -->
+<!--   mtry = 1:8, # default: sqrt(p) where p is number of variables in x and regression (p/3) -->
+<!--   nodesize = 1:20, # default values are different for classification (1) and regression (5) -->
+<!--   ntree = 103, -->
+<!--   verbose = T -->
+<!-- )) -->
+
+<!-- # Contour plot of accurcy ~ hyperparameters mtry & nodesize -->
+<!-- filled.contour( -->
+<!--   x = 1:8, # mtry -->
+<!--   y = 1:20, # nodesize -->
+<!--   matrix( -->
+<!--     data = tune_randomForest_params_10000$performances$error, -->
+<!--     nrow = 8, # mtry -->
+<!--     ncol = 20 # nodesize -->
+<!--   ), -->
+<!--   plot.title = 'Accuracy Gradient Plot; ntree = 10k', -->
+<!--   xlab = 'mtry', -->
+<!--   ylab = 'nodesize' -->
+<!-- ) -->
+<!-- ``` -->
+
+```{r}
+# Tune randomForsest hyperparameters
+(tune_randomForest_params_100000 <- tune.randomForest(
+  x = train_data,
+  y = train_survived,
+  mtry = 1:8, # default: sqrt(p) where p is number of variables in x and regression (p/3)
+  nodesize = 1:20, # default values are different for classification (1) and regression (5)
+  ntree = 104,
+  verbose = T
+))
+
+# Contour plot of accurcy ~ hyperparameters mtry & nodesize
+filled.contour(
+  x = 1:8, # mtry
+  y = 1:20, # nodesize
+  matrix(
+    data = tune_randomForest_params_100000$performances$error,
+    nrow = 8, # mtry
+    ncol = 20 # nodesize
+  ),
+  plot.title = 'Accuracy Gradient Plot; ntree = 100k',
+  xlab = 'mtry',
+  ylab = 'nodesize'
+)
+
+```
+
+
+```{r}
+
+# Deploy model with best hyperparameters
+randomForest_model <- randomForest(
+  x = train_data,
+  y = train_survived,
+  prox = T,
+  mtry = tune_randomForest_params_100000$best.parameters$mtry,
+  nodesize = tune_randomForest_params_100000$best.parameters$nodesize,
+  ntree = tune_randomForest_params_100000$best.parameters$ntree,
+)
+
+# Create confusion matrix to check accuracy
 caret::confusionMatrix(predict(randomForest_model), train_survived)
 
-predict(randomForest_model, na.omit(test))
+# # Predict 
+# predict(randomForest_model, test)
+# 
+# # Predict with chosen model by using best accuracy
+# test_out <- data.frame(PassengerId = test$PassengerId, Survived = predict(randomForest_model, newdata=test, type="response"))
+# 
+# # Save sumbission prediction to a file
+# write.csv(test_out[,c("PassengerId", "Survived")], file="predictions.csv", row.names=FALSE, quote=FALSE)
 
 ```
 
 ## 2) AdaBoost
+
+AdaBoost – podstawowy algorytm do boostingu, metoda dzięki której z dużej liczby słabych klasyfikatorów można otrzymać jeden lepszy. Autorami algorytmu są Yoav Freund i Robert Schapire. AdaBoost działa w ten sposób, że w kolejnych iteracjach trenuje, a następnie mierzy błąd wszystkich dostępnych słabych klasyfikatorów. W każdej następnej iteracji "ważność" źle zakwalifikowanych obserwacji jest zwiększana, tak że klasyfikatory zwracają na nie większą uwagę. Nad AdaBoost pracowali dwaj amerykańscy profesorowie Uniwersytetu Princeton Robert Schapire i Yoav Freund za co otrzymali w 2003 roku nagrodę Gödla, a w 2004 roku Nagrodę Parisa Kanellakisa. Po raz pierwszy zaprezentowali tą technikę w 1997 roku.
 
 ```{r AdaBoost}
 
@@ -166,6 +295,8 @@ predict(treeModel, newdata = test)
 ```
 
 ## 3) Gradient Boosting
+
+Gradient boosting to technika uczenia maszynowego wykorzystywana między innymi w zadaniach regresji i klasyfikacji. Daje model predykcyjny w postaci zespołu słabych modeli predykcyjnych, które są zazwyczaj drzewami decyzyjnymi. Kiedy drzewo decyzyjne jest słabym uczniem, powstały algorytm nazywa się drzewami wzmocnionymi gradientem; zwykle przewyższa losowy las. Model drzew ze wzmocnieniem gradientowym jest budowany etapowo, podobnie jak w przypadku innych metod wzmacniających, ale uogólnia inne metody, umożliwiając optymalizację dowolnej różniczkowalnej funkcji straty.
 
 ```{r gBoost}
 # for reproducibility
@@ -202,9 +333,11 @@ sum(train_gbm$Survived != (make.link("logit")$linkinv(gbm.fit$fit)>0.5)+0)/nrow(
 
 ## 4) XGBoost
 
+XGBoost to zoptymalizowana biblioteka do zwiększania gradientu rozproszonego zaprojektowana tak, aby była wysoce wydajna, elastyczna i przenośna. Implementuje algorytmy uczenia maszynowego w ramach platformy Gradient Boosting. XGBoost zapewnia równoległe wzmacnianie drzewa (znane również jako GBDT, GBM), które rozwiązuje wiele problemów związanych z nauką o danych w szybki i dokładny sposób. Ten sam kod działa w dużym środowisku rozproszonym (Hadoop, SGE, MPI) i może rozwiązać problemy wykraczające poza miliardy przykładów.
+
 ```{r XGBoost}
 gridExpanded <- expand.grid(
-  nrounds = 1:10*10000,
+  nrounds = 1:10*100,
   max_depth = 4:9,
   eta = 5:10*0.01,
   gamma = 0:10,
@@ -213,7 +346,12 @@ gridExpanded <- expand.grid(
   subsample = 5:10*0.1
 )
 
-train_xgboost <- train %>% mutate(Pclass_2 = as.numeric(as.character(Pclass_2)), Pclass_3 = as.numeric(as.character(Pclass_3)), Sex_Female =as.numeric(as.character(Sex_Female)), Embarked_S=as.numeric(as.character(Embarked_S)), Embarked_Q=as.numeric(as.character(Embarked_Q))) %>% select(-c(1)) %>% as.matrix()
+train_xgboost <-
+  train %>% mutate(
+    Sex_Female = as.numeric(as.character(Sex_Female)),
+    Embarked_S = as.numeric(as.character(Embarked_S)),
+    Embarked_Q = as.numeric(as.character(Embarked_Q))
+  ) %>% select(-c(1)) %>% as.matrix()
 
 xgboost_bestParams <- caret::train(
   train_xgboost,
@@ -243,6 +381,12 @@ p2 <- sum(as.numeric(as.character(train$Survived)) != ((predict(bstSparse2, as.m
 
 ## 5) SVM
 
+Uczenie maszynowe, maszyny wektora nośnego (SVM, również sieci wektora nośnego) to nadzorowane modele uczenia się wraz z powiązanymi algorytmami uczenia, które analizują dane w celu analizy klasyfikacji i regresji. Opracowane w AT&T Bell Laboratories przez Vladimira Vapnika z kolegami (Boser i in., 1992, Guyon i in., 1993, Cortes i Vapnik, 1995, Vapnik i in., 1997 SVM są jednym z najbardziej solidne metody przewidywania, oparte na statystycznych ramach uczenia się lub teorii VC zaproponowanej przez Vapnika (1982, 1995) i Chervonenkisa (1974). Mając zestaw przykładów uczących, każdy oznaczony jako należący do jednej z dwóch kategorii, algorytm uczący SVM buduje model, który przypisuje nowe przykłady do jednej lub drugiej kategorii, czyniąc go nieprobabilistycznym binarnym klasyfikatorem liniowym (chociaż metody takie jak Platt skalowanie istnieje, aby używać SVM w ustawieniu klasyfikacji probabilistycznej). SVM odwzorowuje przykłady treningowe na punkty w przestrzeni, aby zmaksymalizować szerokość luki między dwiema kategoriami. Nowe przykłady są następnie mapowane w tej samej przestrzeni i przewiduje się, że będą należeć do kategorii na podstawie tego, po której stronie luki się znajdują.
+
+Oprócz przeprowadzania klasyfikacji liniowej, maszyny SVM mogą wydajnie przeprowadzać klasyfikację nieliniową za pomocą tak zwanej sztuczki jądra, niejawnie mapując swoje dane wejściowe na wielowymiarowe przestrzenie cech.
+
+Gdy dane są nieoznaczone, nadzorowane uczenie się nie jest możliwe i wymagane jest podejście nienadzorowanego uczenia się, które próbuje znaleźć naturalne grupowanie danych w grupy, a następnie mapować nowe dane do tych utworzonych grup. Algorytm grupowania wektorów nośnych, stworzony przez Havę Siegelmanna i Vladimira Vapnika, wykorzystuje statystyki wektorów nośnych, opracowane w algorytmie maszyn wektorów nośnych, do kategoryzacji danych nieoznakowanych.
+
 ```{r SVM}
 obj <- tune.svm(Survived ~ .,
                 data = train,
@@ -264,31 +408,45 @@ table(pred, na.omit(train)$Survived)
 
 ```
 
-## 6) Neural Networks
+<!-- ## 6) Neural Networks -->
 
-```{r NN}
-reticulate::use_condaenv(condaenv = "tf", conda = "/Users/andrzejeljaszewicz/opt/anaconda3/bin/conda")
+<!-- Keras to interfejs programowania aplikacji sieci neuronowej (API) dla Pythona, który jest ściśle zintegrowany z TensorFlow, który służy do budowania modeli uczenia maszynowego. Modele Keras oferują prosty, przyjazny dla użytkownika sposób zdefiniowania sieci neuronowej, którą następnie zbuduje dla Ciebie TensorFlow. -->
+
+<!-- ```{r NN} -->
+<!-- reticulate::use_condaenv(condaenv = "tf", conda = "/Users/andrzejeljaszewicz/opt/anaconda3/bin/conda") -->
 
 
-library(keras)
-model <- keras_model_sequential()
-model %>%
-  layer_dense(units=10,activation = "relu",
-              kernel_initializer = "he_normal",input_shape =c(7))%>%
-  layer_dense(units=2,activation = "sigmoid")
-summary(model)  
+<!-- library(keras) -->
+<!-- model <- keras_model_sequential() -->
+<!-- model %>% -->
+<!--   layer_dense(units=10,activation = "relu", -->
+<!--               kernel_initializer = "he_normal",input_shape =c(7))%>% -->
+<!--   layer_dense(units=2,activation = "sigmoid") -->
+<!-- summary(model)   -->
 
-model %>%
-  compile(loss="binary_crossentropy",
-          optimizer="adam",
-          metric="accuracy")
+<!-- model %>% -->
+<!--   compile(loss="binary_crossentropy", -->
+<!--           optimizer="adam", -->
+<!--           metric="accuracy") -->
 
-history <- model %>%
- fit(trainx,trainlabel,epoch=100,batch_size=20,validation_split=0.2)
+<!-- history <- model %>% -->
+<!--  fit(trainx,trainlabel,epoch=100,batch_size=20,validation_split=0.2) -->
 
-train_eva <- model %>%
-  evaluate(trainx,trainlabel)
+<!-- train_eva <- model %>% -->
+<!--   evaluate(trainx,trainlabel) -->
+
+<!-- ``` -->
+
+
+## 7) Summary
+
+```{r summary}
+
+# Predict with chosen model by using best accuracy
+#test_out$Survived <- predict(model, newdata=test_data_1, type="response")
+
+# Save sumbission prediction to a file
+#write.csv(test_out[,c("PassengerId", "Survived")], file="predictions.csv", row.names=FALSE, quote=FALSE)
 
 ```
-
 
